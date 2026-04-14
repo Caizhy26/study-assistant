@@ -43,8 +43,23 @@ export const AI_SYSTEM_PROMPT = `你是"小言"，一个专业的大学学习规
 - 例如复习重积分 → 极坐标换元、雅可比行列式、常见体型（体积/质心/转动惯量）、积分限陷阱
 - 给的任务必须有具体时间段（周三 14:00-15:30）
 
+═══ 删除 / 清空日程动作（新增）═══
+当用户明确表达“删除今天下午的安排”“移除某个 id 的任务”“清空本周日程”这类意图时：
+- 不要生成 newTasks
+- 将 type 设为 "action"
+- action 只能是 delete_schedule / delete_schedule_by_id / clear_schedule_range
+- payload 根据动作填写：
+  - delete_schedule: {"date":"YYYY-MM-DD","slot":"morning|afternoon|evening"}
+  - delete_schedule_by_id: {"id":"任务id"}
+  - clear_schedule_range: {"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD"}
+- extractedData 设为空对象
+- suggestedAction 设为 "none"
+
 ═══ 输出 JSON 格式（严格遵守，不要多余文字）═══
 {
+  "type": "message|action",
+  "action": "delete_schedule|delete_schedule_by_id|clear_schedule_range|",
+  "payload": {},
   "reply": "给用户看的自然回复。要温暖、简洁、像学长，引导式提问或总结性确认。不要使用 markdown，不要使用 **、##、-等格式符号。",
   "extractedData": {
     "examGoal": "期末考试",
@@ -282,7 +297,7 @@ export function buildOfflineTaskList({ profile, preferredSubjects = [], text = "
             slot: SLOTS.some((slot) => slot.key === slotInfo.slot) ? slotInfo.slot : "evening",
             priority,
             difficulty,
-            note: "离线模式自动生成，可继续在对话里补充教材版本、考试时间和空闲时段。",
+            note: "离线模式自动生成，可继续在对话里补充教材版本、考试时间和活动/事务时间。",
         };
     });
 }
@@ -443,11 +458,19 @@ export function normalizeExtractedDataPayload(data = {}) {
         subject: normalizeOfflineSubjectName(task.subject || normalizedSubjects[0]?.name || "未分类"),
     })).filter((task) => task.title && task.subject);
 
+    const normalizedOccupiedBlocks = (data.occupiedBlocks || []).map((block) => ({
+        id: block.id || uid(),
+        title: String(block.title || "临时事务").trim() || "临时事务",
+        date: normalizePlannedDate(block.date || today()),
+        slot: SLOTS.some((slot) => slot.key === block.slot) ? block.slot : "evening",
+    }));
+
     return {
         ...data,
         subjects: normalizedSubjects,
         issues: normalizedIssues,
         newTasks: normalizedTasks,
+        occupiedBlocks: normalizedOccupiedBlocks,
     };
 }
 
@@ -475,8 +498,10 @@ export function mergeProfileSnapshot(baseProfile, data) {
 export async function recognizeScheduleFromAttachment(dataUrl) {
     try {
         const raw = await callVisionAI(dataUrl, SCHEDULE_PROMPT);
-        const match = raw.match(/\{[\s\S]*\}/);
-        const parsed = JSON.parse(match ? match[0] : raw);
+        // 复用统一的 JSON 提取器（支持 ```json``` 包裹、前后多余文字、大括号配平），
+        // 比原先的贪婪正则 /\{[\s\S]*\}/ 稳健得多。
+        const parsed = extractJSONFromReply(raw);
+        if (!parsed) throw new Error("视觉模型返回的内容不是合法 JSON");
         return parsed;
     } catch (err) {
         const fallback = offlineScheduleRecognition();
@@ -512,10 +537,16 @@ export async function callAIChat(messages, { model, temperature, max_tokens, res
 export const callSCNetAI = callAIChat;
 
 // 健康检查：让 IntakePage 判断当前是"在线代理 + 已配置 Key"还是"离线模式"
-export async function checkAIHealth() {
+// 加 5s 超时：CloudBase Run 冷启动期间 fetch 可能挂很久，没超时会让页面卡在 loading。
+export async function checkAIHealth({ timeoutMs = 5000 } = {}) {
     const fallback = { ok: false, mode: "offline", chatConfigured: false, visionConfigured: false };
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
     try {
-        const res = await fetch(buildApiUrl("/api/health"), { method: "GET" });
+        const res = await fetch(buildApiUrl("/api/health"), {
+            method: "GET",
+            signal: controller?.signal,
+        });
         if (!res.ok) return fallback;
         const data = await res.json();
         return {
@@ -528,6 +559,8 @@ export async function checkAIHealth() {
         };
     } catch {
         return fallback;
+    } finally {
+        if (timer) clearTimeout(timer);
     }
 }
 

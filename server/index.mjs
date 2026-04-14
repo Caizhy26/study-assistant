@@ -156,6 +156,8 @@ const server = http.createServer(async (req, res) => {
             const data = await proxyChat(body);
             sendJson(res, 200, data);
         } catch (error) {
+            // 打到 stderr，CloudBase Run 日志面板里能看到真实错误
+            console.error("[/api/chat] proxy failed:", error?.message || error);
             sendJson(res, 500, { error: error.message });
         }
         return;
@@ -167,6 +169,7 @@ const server = http.createServer(async (req, res) => {
             const data = await proxyVision(body);
             sendJson(res, 200, data);
         } catch (error) {
+            console.error("[/api/vision] proxy failed:", error?.message || error);
             sendJson(res, 500, { error: error.message });
         }
         return;
@@ -177,4 +180,10 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
     console.log(`AI proxy server running at http://localhost:${PORT}`);
+    console.log(`  textApiUrl   = ${TEXT_API_URL}`);
+    console.log(`  textModel    = ${TEXT_MODEL}`);
+    console.log(`  chatConfigured   = ${Boolean(TEXT_API_KEY)}`);
+    console.log(`  visionApiUrl = ${VISION_API_URL}`);
+    console.log(`  visionModel  = ${VISION_MODEL}`);
+    console.log(`  visionConfigured = ${Boolean(VISION_API_KEY)}`);
 });

@@ -19,7 +19,7 @@ import {
 import { Card, Button, Input, Tag } from "../components/ui";
 import IntakeFormPage from "./IntakeFormPage";
 
-export default function IntakePage({ profile, setProfile, intakeCompletion, setTasks, tasks, importAIPlan, handleReplan, setIssues, setTab }) {
+export default function IntakePage({ profile, setProfile, intakeCompletion, setTasks, tasks, importAIPlan, handleReplan, setIssues, setTab, occupiedBlocks = [], setOccupiedBlocks, deleteScheduleById, deleteScheduleByTime, clearScheduleByRange, runOptimizer }) {
     const [mode, setMode] = useState("chat");
     const [chatHistory, setChatHistory] = useStore("sa_chat_history_v2", [
         { role: "assistant", content: `你好呀 🌿 我是小言，你的 AI 学习规划师。
@@ -64,6 +64,32 @@ export default function IntakePage({ profile, setProfile, intakeCompletion, setT
                 })),
             ]);
         }
+        if (normalized.occupiedBlocks && normalized.occupiedBlocks.length > 0 && setOccupiedBlocks) {
+            setOccupiedBlocks((prev) => {
+                const base = (prev || []).slice();
+                const seen = new Set(base.map((block) => `${block?.date}|${block?.slot}`));
+                const next = base.slice();
+                normalized.occupiedBlocks.forEach((block) => {
+                    const key = `${block.date}|${block.slot}`;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    next.push(block);
+                });
+                return next;
+            });
+            if (runOptimizer) {
+                const existing = Array.isArray(occupiedBlocks) ? occupiedBlocks : [];
+                const seen = new Set(existing.map((block) => `${block?.date}|${block?.slot}`));
+                const mergedBlocks = existing.slice();
+                normalized.occupiedBlocks.forEach((block) => {
+                    const key = `${block.date}|${block.slot}`;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    mergedBlocks.push(block);
+                });
+                runOptimizer(mergedBlocks);
+            }
+        }
         if (normalized.newTasks && normalized.newTasks.length > 0 && setTasks) {
             setTasks((prev) => mergeUniqueTasks(prev || [], normalized.newTasks.map((task) => ({
                 ...task,
@@ -71,6 +97,72 @@ export default function IntakePage({ profile, setProfile, intakeCompletion, setT
                 note: task.note || "",
             })), { fallbackSource: "ai-chat" }));
         }
+    };
+
+    const normalizeSlotText = (value) => {
+        const raw = String(value || "").trim();
+        if (["morning", "afternoon", "evening"].includes(raw)) return raw;
+        if (raw === "上午") return "morning";
+        if (raw === "下午") return "afternoon";
+        if (raw === "晚上" || raw === "晚间") return "evening";
+        return "";
+    };
+
+    const parseDateFromText = (value) => {
+        const text = String(value || "");
+        const explicit = text.match(/\d{4}-\d{2}-\d{2}/);
+        if (explicit) return explicit[0];
+        if (/后天/.test(text)) return new Date(Date.now() + 2 * 86400000).toISOString().split("T")[0];
+        if (/明天/.test(text)) return new Date(Date.now() + 86400000).toISOString().split("T")[0];
+        if (/今天/.test(text)) return today();
+        return "";
+    };
+
+    const parseActionFromUserText = (value) => {
+        const text = String(value || "").trim();
+        if (!text) return null;
+
+        const idMatch = text.match(/(?:删除|移除).{0,6}(?:id|ID)\s*[:：]?\s*([a-zA-Z0-9_-]+)/);
+        if (idMatch) return { type: "action", action: "delete_schedule_by_id", payload: { id: idMatch[1] } };
+
+        if (/清空|删除/.test(text) && /(本周|这周)/.test(text)) {
+            const startDate = new Date(`${today()}T00:00:00`);
+            const dow = startDate.getDay() || 7;
+            const weekStart = new Date(startDate);
+            weekStart.setDate(startDate.getDate() - dow + 1);
+            const startKey = weekStart.toISOString().split("T")[0];
+            const endDate = new Date(weekStart);
+            endDate.setDate(weekStart.getDate() + 6);
+            const endKey = endDate.toISOString().split("T")[0];
+            return { type: "action", action: "clear_schedule_range", payload: { startDate: startKey, endDate: endKey } };
+        }
+
+        const slotMatch = text.match(/(上午|下午|晚上|晚间|morning|afternoon|evening)/);
+        const slot = normalizeSlotText(slotMatch ? slotMatch[1] : "");
+        const date = parseDateFromText(text);
+        if (/删除|移除|清空/.test(text) && date && slot) {
+            return { type: "action", action: "delete_schedule", payload: { date, slot } };
+        }
+
+        return null;
+    };
+
+    const runAction = (actionObj) => {
+        const action = actionObj?.action;
+        const payload = actionObj?.payload || {};
+        if (action === "delete_schedule_by_id") {
+            if (deleteScheduleById) deleteScheduleById(payload.id);
+            return true;
+        }
+        if (action === "delete_schedule") {
+            if (deleteScheduleByTime) deleteScheduleByTime(payload.date, payload.slot);
+            return true;
+        }
+        if (action === "clear_schedule_range") {
+            if (clearScheduleByRange) clearScheduleByRange(payload.startDate, payload.endDate);
+            return true;
+        }
+        return false;
     };
 
     const handlePickAttachment = async (e) => {
@@ -104,6 +196,22 @@ export default function IntakePage({ profile, setProfile, intakeCompletion, setT
         setInput("");
         setPendingAttachment(null);
         setAttachmentError("");
+
+        const localAction = text ? parseActionFromUserText(text) : null;
+        if (!attachment && localAction) {
+            const userMessage = { role: "user", content: text, attachment: null };
+            const newHistory = [...chatHistory, userMessage];
+            setChatHistory(newHistory);
+            const applied = runAction(localAction);
+            setChatHistory((prev) => [...prev, {
+                role: "assistant",
+                content: applied
+                    ? "✅ 已执行日程删除操作，并已重新计算后续安排。"
+                    : "⚠️ 没能识别要删除的具体时间。你可以说：删除今天下午 / 删除 2026-04-15 晚上 / 清空本周。",
+            }]);
+            if (applied && setTab) setTimeout(() => setTab("plan"), 220);
+            return;
+        }
 
         const userMessage = {
             role: "user",
@@ -175,11 +283,14 @@ ${recognized.note || "我已经参考图片内容补充信息。"}`;
             const tryParsed = extractJSONFromReply(rawReply);
             let parsed = tryParsed && typeof tryParsed === "object"
                 ? {
+                    type: tryParsed.type || "message",
+                    action: tryParsed.action || "",
+                    payload: tryParsed.payload || {},
                     reply: tryParsed.reply || rawReply,
                     extractedData: normalizeExtractedDataPayload(tryParsed.extractedData || {}),
                     suggestedAction: tryParsed.suggestedAction || "none",
                 }
-                : { reply: rawReply, extractedData: null, suggestedAction: "none" };
+                : { type: "message", action: "", payload: {}, reply: rawReply, extractedData: null, suggestedAction: "none" };
 
             const wantsSchedule = /安排|排|计划|日程|加进|加到|帮我|生成|规划/.test(text || "");
             const hasNewTasks = parsed.extractedData?.newTasks?.length > 0;
@@ -220,14 +331,16 @@ ${JSON.stringify(newHistory.slice(-8))}
                 }
             }
 
-            const assistantContent = [attachmentIntro, serviceNotice, parsed.reply].filter(Boolean).join("\n\n");
-            setChatHistory([...newHistory, { role: "assistant", content: assistantContent }]);
-
             if (parsed.extractedData) mergeExtractedData(parsed.extractedData);
 
+            const actionApplied = (parsed.type === "action" || parsed.action) ? runAction(parsed) : false;
+            const assistantFallbackReply = actionApplied ? "✅ 已执行日程删除操作，并已重新计算后续安排。" : "";
+            const assistantContent = [attachmentIntro, serviceNotice, parsed.reply || assistantFallbackReply].filter(Boolean).join("\n\n");
+            setChatHistory([...newHistory, { role: "assistant", content: assistantContent }]);
+
             const generatedTaskCount = parsed.extractedData?.newTasks?.length || 0;
-            if (parsed.suggestedAction === "generatePlan" && generatedTaskCount > 0 && setTab) {
-                setTimeout(() => setTab("plan"), 300);
+            if ((parsed.suggestedAction === "generatePlan" && generatedTaskCount > 0) || actionApplied) {
+                if (setTab) setTimeout(() => setTab("plan"), 300);
             }
             if (parsed.suggestedAction === "replan" && handleReplan) {
                 setTimeout(() => handleReplan(), 500);
@@ -388,6 +501,21 @@ ${newTasks.map((task) => `• ${task.plannedDate} ${SLOT_LABELS[task.slot] || ta
                         {(profile.subjects || []).map((subject) => (
                             <Tag key={subject.id} color="#111111" bg="#fff">
                                 {subject.name}{subject.examDate ? ` · ${fmt(subject.examDate)}` : ""}
+                            </Tag>
+                        ))}
+                    </div>
+                </Card>
+            )}
+
+            {(occupiedBlocks || []).length > 0 && (
+                <Card style={{ padding: "10px 14px", background: "#f8fafc", border: "1px solid rgba(198,198,198,0.16)" }}>
+                    <div style={{ fontSize: 11, color: "#334155", marginBottom: 6, fontWeight: 600 }}>
+                        🗂️ 已记录的事务占用
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {(occupiedBlocks || []).slice(-8).map((block) => (
+                            <Tag key={block.id || `${block.date}-${block.slot}`} color="#0f172a" bg="#fff">
+                                {block.date} · {SLOT_LABELS[block.slot] || block.slot} · {block.title || "临时事务"}
                             </Tag>
                         ))}
                     </div>

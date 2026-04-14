@@ -67,10 +67,27 @@ export function getWeekStartDate(base = new Date()) {
     return d;
 }
 
-export function collectCurrentWeekFreeSlots(schedule) {
+export function buildOccupiedSlotSet(occupiedBlocks = []) {
+    const set = new Set();
+    (occupiedBlocks || []).forEach((block) => {
+        const dateKey = String(block?.date || '').trim();
+        const slotKey = String(block?.slot || '').trim();
+        if (!dateKey || !slotKey) return;
+        set.add(`${dateKey}|${slotKey}`);
+    });
+    return set;
+}
+
+export function isOccupiedSlot(occupiedSet, dateKey, slotKey) {
+    if (!occupiedSet || !dateKey || !slotKey) return false;
+    return occupiedSet.has(`${dateKey}|${slotKey}`);
+}
+
+export function collectCurrentWeekFreeSlots(schedule, occupiedBlocks = []) {
     const result = [];
     const weekStart = getWeekStartDate(new Date());
     const todayKey = today();
+    const occupiedSet = buildOccupiedSlotSet(occupiedBlocks);
 
     for (let i = 0; i < 7; i += 1) {
         const date = addDays(i, weekStart);
@@ -78,7 +95,7 @@ export function collectCurrentWeekFreeSlots(schedule) {
         if (dateKey < todayKey) continue;
         const dayKey = getWeekdayKey(date);
         SLOTS.forEach((slot) => {
-            if (schedule?.[`${dayKey}-${slot.key}`] === "free") {
+            if (schedule?.[`${dayKey}-${slot.key}`] === "free" && !isOccupiedSlot(occupiedSet, dateKey, slot.key)) {
                 result.push({
                     date: dateKey,
                     slot: slot.key,
@@ -100,9 +117,9 @@ export function countDesiredWeeklyTasks(subjects = []) {
     }, 0);
 }
 
-export function getWeeklyPlanMeta(profile) {
+export function getWeeklyPlanMeta(profile, occupiedBlocks = []) {
     const subjects = (profile?.subjects || []).slice();
-    const freeSlots = collectCurrentWeekFreeSlots(profile?.schedule || {});
+    const freeSlots = collectCurrentWeekFreeSlots(profile?.schedule || {}, occupiedBlocks);
     const desiredTasks = countDesiredWeeklyTasks(subjects);
     const shortage = Math.max(desiredTasks - freeSlots.length, 0);
 
@@ -138,7 +155,9 @@ export function normalizeTaskInput(task = {}, fallbackSource = "manual") {
         done: Boolean(task.done),
         blocked: Boolean(task.blocked),
         source: task.source || fallbackSource,
-        createdAt: task.createdAt || today(),
+        // 统一成数字时间戳，和 buildSeedTasks 里 Date.now() 保持一致，
+        // 避免字符串 "2026-04-15" 和数字时间戳混用导致排序/比较异常。
+        createdAt: typeof task.createdAt === "number" ? task.createdAt : (task.createdAt ? Date.parse(task.createdAt) || Date.now() : Date.now()),
     };
 }
 
@@ -241,15 +260,18 @@ export function getSubjectPriority(subject) {
     return score;
 }
 
-export function collectFreeSlots(schedule, days = 7) {
+export function collectFreeSlots(schedule, days = 7, occupiedBlocks = []) {
     const result = [];
+    const occupiedSet = buildOccupiedSlotSet(occupiedBlocks);
     for (let i = 0; i < days; i += 1) {
         const date = addDays(i);
+        // 用本地时区的日期 key，避免 toISOString 在凌晨把日期算到前一天
+        const dateKey = toDateKey(date);
         const dayKey = getWeekdayKey(date);
         SLOTS.forEach((slot) => {
-            if (schedule?.[`${dayKey}-${slot.key}`] === "free") {
+            if (schedule?.[`${dayKey}-${slot.key}`] === "free" && !isOccupiedSlot(occupiedSet, dateKey, slot.key)) {
                 result.push({
-                    date: date.toISOString().split("T")[0],
+                    date: dateKey,
                     slot: slot.key,
                     label: `${fmt(date)} ${SLOT_LABELS[slot.key]}`,
                 });
@@ -311,9 +333,9 @@ export function taskTemplate(subject, index, issueText) {
     return `${subject.name} · ${templates[index % templates.length]}`;
 }
 
-export function buildWeeklyTaskSuggestions(profile, issues = [], currentEnergy = "normal") {
+export function buildWeeklyTaskSuggestions(profile, issues = [], currentEnergy = "normal", occupiedBlocks = []) {
     const subjects = (profile.subjects || []).slice().sort((a, b) => getSubjectPriority(b) - getSubjectPriority(a));
-    const freeSlots = collectCurrentWeekFreeSlots(profile.schedule || {});
+    const freeSlots = collectCurrentWeekFreeSlots(profile.schedule || {}, occupiedBlocks);
     const unresolved = issues.filter((i) => i.status !== "resolved");
     const issueBySubject = unresolved.reduce((acc, item) => {
         if (!acc[item.subject]) acc[item.subject] = [];
@@ -368,7 +390,7 @@ export function buildWeeklyTaskSuggestions(profile, issues = [], currentEnergy =
             done: false,
             source: "ai",
             blocked: false,
-            createdAt: today(),
+            createdAt: Date.now(),
             masteryExpected: subject.base === "weak" ? "understand" : "grasp",
             note: issueText ? `来自卡点反馈：${issueText}` : (subject.focus || ""),
         });
@@ -449,14 +471,14 @@ export function recommendWhatToDo(tasks, currentEnergy) {
     };
 }
 
-export function replanPendingTasks(tasks, schedule, currentEnergy) {
+export function replanPendingTasks(tasks, schedule, currentEnergy, occupiedBlocks = []) {
     const pending = tasks.filter((t) => !t.done).sort((a, b) => {
         const p = (PRIORITY[b.priority || "medium"]?.weight || 2) - (PRIORITY[a.priority || "medium"]?.weight || 2);
         if (p !== 0) return p;
         return (DIFFICULTY[b.difficulty || "medium"]?.weight || 2) - (DIFFICULTY[a.difficulty || "medium"]?.weight || 2);
     });
 
-    const freeSlots = collectFreeSlots(schedule, 10);
+    const freeSlots = collectFreeSlots(schedule, 10, occupiedBlocks);
     const lowEnergy = currentEnergy === "low" || currentEnergy === "empty";
     const assignmentMap = {};
     let pointer = 0;
@@ -509,7 +531,7 @@ export function createReviewItem(subject, topic) {
         topic,
         subject,
         learnDate: today(),
-        nextDate: nextDate.toISOString().split("T")[0],
+        nextDate: toDateKey(nextDate),
         count: 0,
         done: false,
     };
