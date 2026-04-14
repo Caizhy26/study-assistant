@@ -25,7 +25,7 @@ function loadEnvFile(filename) {
 loadEnvFile(".env.local");
 loadEnvFile(".env");
 
-const PORT = Number(process.env.PORT || 8787);
+const PORT = Number(process.env.PORT || 80);
 const TEXT_API_URL = process.env.TEXT_API_URL || process.env.DEEPSEEK_API_URL || "https://api.deepseek.com/chat/completions";
 const TEXT_MODEL = process.env.TEXT_MODEL || "deepseek-chat";
 const TEXT_API_KEY = process.env.TEXT_API_KEY || process.env.DEEPSEEK_API_KEY || "";
