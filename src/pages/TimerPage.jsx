@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { MASTERY } from "../constants/appConstants";
-import { uid, today, addDays, formatTime, defaultTimerState } from "../utils/core";
+import { uid, today, addDays, formatTime, defaultTimerState, toLocalDateKey } from "../utils/core";
 import { getMasteryLabel, createReviewItem, playBellSound } from "../utils/study";
 import { Card, Button, Input, Textarea, Select, Tag } from "../components/ui";
 import { sectionTitle, emptyText, listRow } from "../styles/appStyles";
@@ -201,14 +201,14 @@ export default function TimerPage({
                     ...task,
                     blocked: mastery === "fuzzy" || mastery === "new" ? true : task.blocked,
                     plannedDate: mastery === "fuzzy" || mastery === "new"
-                        ? addDays(1, task.plannedDate ? new Date(task.plannedDate) : new Date()).toISOString().split("T")[0]
+                        ? toLocalDateKey(addDays(1, task.plannedDate ? new Date(task.plannedDate) : new Date()))
                         : task.plannedDate,
                 };
             }));
         }
 
         const isNewDay = achievements.lastStudyDate !== today();
-        const isConsecutive = achievements.lastStudyDate === addDays(-1).toISOString().split("T")[0];
+        const isConsecutive = achievements.lastStudyDate === toLocalDateKey(addDays(-1));
         setAchievements({
             streak: isNewDay ? (isConsecutive ? achievements.streak + 1 : 1) : achievements.streak,
             lastStudyDate: today(),

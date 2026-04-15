@@ -12,7 +12,7 @@ import {
   STUDY_ROUTE_KEYS,
   VALID_TAB_KEYS,
 } from "../constants/appConstants";
-import { addDays, fmt, today, uid } from "./core";
+import { addDays, diffDays, fmt, today, toLocalDateKey, uid } from "./core";
 
 // 学习业务逻辑：任务、规划、精力、复习、统计
 
@@ -193,13 +193,15 @@ export function mergeUniqueTasks(existingTasks = [], incomingTasks = [], { repla
 
 export function getSafeTab(tab) {
     if (VALID_TAB_KEYS.has(tab)) return tab;
-    return "dashboard";
+    return "now";
 }
 
 export function getActiveMainTab(tab) {
+    if (tab === "now") return "now";
+    if (tab === "intake" || tab === "home") return "intake";
     if (STUDY_ROUTE_KEYS.has(tab)) return "study";
-    if (STATE_ROUTE_KEYS.has(tab)) return "state";
-    if (tab === "intake") return "home";
+    if (STATE_ROUTE_KEYS.has(tab)) return "now";
+    if (tab === "dashboard") return "study";
     return getSafeTab(tab);
 }
 
@@ -252,7 +254,7 @@ export function getSubjectPriority(subject) {
     const target = Number(subject.targetScore || 0);
     let score = baseScore * 14 + Math.min(weekly, 8) * 4 + Math.min(Math.max(target - 60, 0), 40) / 4;
     if (subject.examDate) {
-        const days = Math.ceil((new Date(subject.examDate) - new Date()) / 86400000);
+        const days = diffDays(subject.examDate, today());
         if (days <= 7) score += 24;
         else if (days <= 14) score += 16;
         else if (days <= 30) score += 10;
@@ -266,7 +268,7 @@ export function collectFreeSlots(schedule, days = 7, occupiedBlocks = []) {
     for (let i = 0; i < days; i += 1) {
         const date = addDays(i);
         // 用本地时区的日期 key，避免 toISOString 在凌晨把日期算到前一天
-        const dateKey = toDateKey(date);
+        const dateKey = toLocalDateKey(date);
         const dayKey = getWeekdayKey(date);
         SLOTS.forEach((slot) => {
             if (schedule?.[`${dayKey}-${slot.key}`] === "free" && !isOccupiedSlot(occupiedSet, dateKey, slot.key)) {
@@ -286,7 +288,7 @@ export function buildMonthlyPlan(profile, issues = []) {
     return subjects.map((subject) => {
         const weakCount = issues.filter((i) => i.subject === subject.name && i.status !== "resolved").length;
         const focus = weakCount > 0 ? `优先解决 ${weakCount} 个卡点/错题` : (subject.focus || "基础梳理 + 题型训练");
-        const daysLeft = subject.examDate ? Math.ceil((new Date(subject.examDate) - new Date()) / 86400000) : null;
+        const daysLeft = subject.examDate ? diffDays(subject.examDate, today()) : null;
 
         let stage1 = "完成章节摸底与基础知识清点";
         let stage2 = "围绕题型做专项训练";
@@ -446,7 +448,7 @@ export function recommendWhatToDo(tasks, currentEnergy) {
         let score = (PRIORITY[task.priority || "medium"]?.weight || 2) * 10 + (DIFFICULTY[task.difficulty || "medium"]?.weight || 2) * 4;
 
         if (task.deadline) {
-            const days = Math.ceil((new Date(task.deadline) - new Date()) / 86400000);
+            const days = diffDays(task.deadline, today());
             if (days <= 3) score += 16;
             else if (days <= 7) score += 10;
             else if (days <= 14) score += 5;

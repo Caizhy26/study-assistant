@@ -112,8 +112,8 @@ export default function IntakePage({ profile, setProfile, intakeCompletion, setT
         const text = String(value || "");
         const explicit = text.match(/\d{4}-\d{2}-\d{2}/);
         if (explicit) return explicit[0];
-        if (/后天/.test(text)) return new Date(Date.now() + 2 * 86400000).toISOString().split("T")[0];
-        if (/明天/.test(text)) return new Date(Date.now() + 86400000).toISOString().split("T")[0];
+        if (/后天/.test(text)) return toLocalDateKey(addDays(2));
+        if (/明天/.test(text)) return toLocalDateKey(addDays(1));
         if (/今天/.test(text)) return today();
         return "";
     };
@@ -130,10 +130,10 @@ export default function IntakePage({ profile, setProfile, intakeCompletion, setT
             const dow = startDate.getDay() || 7;
             const weekStart = new Date(startDate);
             weekStart.setDate(startDate.getDate() - dow + 1);
-            const startKey = weekStart.toISOString().split("T")[0];
+            const startKey = toLocalDateKey(weekStart);
             const endDate = new Date(weekStart);
             endDate.setDate(weekStart.getDate() + 6);
-            const endKey = endDate.toISOString().split("T")[0];
+            const endKey = toLocalDateKey(endDate);
             return { type: "action", action: "clear_schedule_range", payload: { startDate: startKey, endDate: endKey } };
         }
 

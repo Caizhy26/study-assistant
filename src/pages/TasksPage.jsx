@@ -82,7 +82,7 @@ export default function TasksPage({ tasks, setTasks, profile, setTab }) {
             const base = task.plannedDate ? new Date(task.plannedDate) : new Date();
             return {
                 ...task,
-                plannedDate: addDays(1, base).toISOString().split("T")[0],
+                plannedDate: toLocalDateKey(addDays(1, base)),
             };
         }));
     };

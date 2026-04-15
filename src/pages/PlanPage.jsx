@@ -1,10 +1,10 @@
 import React, { useState } from "react";
 import { SLOT_LABELS } from "../constants/appConstants";
-import { today, fmt } from "../utils/core";
-import { isAiTask, getEnergyInfo } from "../utils/study";
-import { Card, Button, Tag } from "../components/ui";
-import { H2, emptyText } from "../styles/appStyles";
-export default function PlanPage({ monthlyPlan, weeklyPreview, weeklyPlanMeta, tasks, setTasks, importAIPlan, handleReplan, currentEnergy, setTab }) {
+import { today } from "../utils/core";
+import { isAiTask, normalizeRecordDate } from "../utils/study";
+import { Button, Card } from "../components/ui";
+
+export default function PlanPage({ weeklyPreview, weeklyPlanMeta, tasks, setTasks, importAIPlan, handleReplan, setTab }) {
     const aiPending = tasks.filter((t) => !t.done && isAiTask(t)).length;
     const [weekOffset, setWeekOffset] = useState(0);
 
@@ -16,6 +16,7 @@ export default function PlanPage({ monthlyPlan, weeklyPreview, weeklyPlanMeta, t
         mon.setHours(0, 0, 0, 0);
         return mon;
     };
+
     const weekStart = getWeekStart(weekOffset);
     const weekDays = Array.from({ length: 7 }, (_, i) => {
         const d = new Date(weekStart);
@@ -45,13 +46,10 @@ export default function PlanPage({ monthlyPlan, weeklyPreview, weeklyPlanMeta, t
 
     const userWeekTasks = tasks.filter((t) => {
         if (!t.plannedDate) return false;
-        const d = new Date(t.plannedDate);
-        return d >= weekStart && d < new Date(weekStart.getTime() + 7 * 86400000);
+        const dateKey = normalizeRecordDate(t.plannedDate);
+        return dateKey >= normalizeRecordDate(weekStart) && dateKey <= normalizeRecordDate(weekDays[6]);
     });
-    // AI 预览任务投影到周历时的约束：
-    //   1) 跳过 afternoon 槽（SLOT_TIME.afternoon 从 13:00 起绘，会侵占学生 13–14 午休）
-    //   2) 每天至多保留 1 个 AI 建议，避免日程被未确认的建议填满
-    //   完整的 AI 建议仍在顶部"本周 AI 计划预览"卡片中展示，用户可点击导入
+
     const aiPerDay = {};
     const aiWeekTasks = weeklyPreview.filter((t) => {
         if (tasks.find((x) => x.id === t.id)) return false;
@@ -69,117 +67,92 @@ export default function PlanPage({ monthlyPlan, weeklyPreview, weeklyPlanMeta, t
     const HOUR_HEIGHT = 48;
 
     const toggleDone = (taskId) => {
-        if (setTasks) setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, done: !t.done } : t));
+        if (setTasks) setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, done: !t.done } : t)));
     };
 
     const navArrowBtn = {
-        background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8,
-        padding: "6px 12px", cursor: "pointer", fontSize: 12, color: "#4b5563",
-        fontFamily: "inherit", fontWeight: 500,
+        background: "#fff",
+        border: "1px solid #e5e7eb",
+        borderRadius: 8,
+        padding: "6px 12px",
+        cursor: "pointer",
+        fontSize: 12,
+        color: "#4b5563",
+        fontFamily: "inherit",
+        fontWeight: 500,
     };
 
     return (
-        <div>
-            {/* 顶部操作栏 */}
-            <Card style={{ background: "linear-gradient(135deg, #f3f3f4, #ecfeff)", padding: "14px 16px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ height: "100%", overflow: "hidden", display: "flex", flexDirection: "column", gap: 10 }}>
+            <Card style={{ padding: "12px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "nowrap" }}>
                     <div>
-                        <div style={{ fontSize: 15, fontWeight: 700, color: "#111111" }}>📅 智能日程</div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#111111" }}>周视图</div>
                         <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
-                            今日完成 {todayDone}/{todayAllTasks.length} · <b style={{ color: todayRate >= 80 ? "#22c55e" : todayRate >= 50 ? "#f59e0b" : "#6b7280" }}>{todayRate}%</b>
+                            今日完成 {todayDone}/{todayAllTasks.length} · <b style={{ color: todayRate >= 80 ? "#22c55e" : todayRate >= 50 ? "#f59e0b" : "#6b7280" }}>{todayRate}%</b> · {weeklyPlanMeta?.isCompressed ? "可用时段不足，已压缩建议" : "按空闲时段排程"}
                         </div>
                     </div>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "nowrap" }}>
                         <Button onClick={importAIPlan} disabled={weeklyPreview.length === 0} style={{ fontSize: 12, padding: "6px 12px" }}>导入 AI 计划</Button>
                         <Button variant="secondary" onClick={handleReplan} disabled={aiPending === 0} style={{ fontSize: 12, padding: "6px 12px" }}>重排</Button>
                     </div>
                 </div>
             </Card>
 
-            {weeklyPlanMeta?.subjectCount > 0 && !weeklyPlanMeta?.hasFreeSlots && (
-                <Card style={{ padding: "12px 14px", background: "rgba(255,255,255,0.92)" }}>
-                    <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.7 }}>
-                        本周暂时没有可排学习时段，AI 计划不会继续铺到下周。先去“摸底”里增加空闲时间，再重新导入会更准确。
-                    </div>
-                </Card>
-            )}
-            {weeklyPlanMeta?.isCompressed && (
-                <Card style={{ padding: "12px 14px", background: "rgba(255,255,255,0.92)" }}>
-                    <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.7 }}>
-                        这周可用时段不足，系统已自动压缩为 {weeklyPlanMeta.freeSlotCount} 项预览任务，另有 {weeklyPlanMeta.shortage} 项建议未排入。
-                    </div>
-                </Card>
-            )}
-
-            {/* 周导航 */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "14px 0 10px", padding: "8px 4px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px" }}>
                 <button onClick={() => setWeekOffset((o) => o - 1)} style={navArrowBtn}>‹ 上周</button>
                 <div style={{ textAlign: "center" }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#111111" }}>{weekRangeLabel}</div>
                     {weekOffset !== 0 && (
-                        <button onClick={() => setWeekOffset(0)} style={{
-                            fontSize: 10, color: "#3b82f6", background: "none", border: "none",
-                            cursor: "pointer", marginTop: 2, fontFamily: "inherit",
-                        }}>回到本周</button>
+                        <button
+                            onClick={() => setWeekOffset(0)}
+                            style={{
+                                fontSize: 10,
+                                color: "#3b82f6",
+                                background: "none",
+                                border: "none",
+                                cursor: "pointer",
+                                marginTop: 2,
+                                fontFamily: "inherit",
+                            }}
+                        >
+                            回到本周
+                        </button>
                     )}
                 </div>
                 <button onClick={() => setWeekOffset((o) => o + 1)} style={navArrowBtn}>下周 ›</button>
             </div>
 
-            {/* 日历主体 */}
-            <div style={{ background: "#fff", borderRadius: 14, overflow: "hidden", boxShadow: "0 2px 10px rgba(26,28,28,0.04)", border: "1px solid #e5e7eb" }}>
-                {/* 星期头部 */}
+            <div style={{ flex: 1, minHeight: 0, background: "#fff", borderRadius: 14, overflow: "hidden", boxShadow: "0 2px 10px rgba(26,28,28,0.04)", border: "1px solid #e5e7eb" }}>
                 <div style={{ display: "flex", borderBottom: "1px solid #e5e7eb", background: "#fafbf8" }}>
                     <div style={{ width: 44, flexShrink: 0 }} />
                     {weekDays.map((d, i) => {
-                        const ds = d.toISOString().split("T")[0];
+                        const ds = normalizeRecordDate(d);
                         const isToday = ds === todayStr;
                         return (
-                            <div key={i} style={{
-                                flex: 1, textAlign: "center", padding: "8px 2px",
-                                background: isToday ? "#f3f3f4" : "transparent",
-                                borderLeft: i === 0 ? "none" : "1px solid #f3f4f6",
-                            }}>
-                                <div style={{ fontSize: 10, color: isToday ? "#3b82f6" : "#9ca3af", fontWeight: 500 }}>
-                                    {["一", "二", "三", "四", "五", "六", "日"][i]}
-                                </div>
-                                <div style={{ fontSize: 14, fontWeight: 700, marginTop: 2, color: isToday ? "#3b82f6" : "#374151" }}>
-                                    {d.getDate()}
-                                </div>
+                            <div key={i} style={{ flex: 1, textAlign: "center", padding: "8px 2px", background: isToday ? "#f3f3f4" : "transparent", borderLeft: i === 0 ? "none" : "1px solid #f3f4f6" }}>
+                                <div style={{ fontSize: 10, color: isToday ? "#3b82f6" : "#9ca3af", fontWeight: 500 }}>{["一", "二", "三", "四", "五", "六", "日"][i]}</div>
+                                <div style={{ fontSize: 14, fontWeight: 700, marginTop: 2, color: isToday ? "#3b82f6" : "#374151" }}>{d.getDate()}</div>
                             </div>
                         );
                     })}
                 </div>
 
-                {/* 时间网格 */}
-                <div style={{ display: "flex", maxHeight: 520, overflowY: "auto" }}>
+                <div style={{ display: "flex", height: "100%", minHeight: 0, overflowY: "auto" }}>
                     <div style={{ width: 44, flexShrink: 0, borderRight: "1px solid #f3f4f6" }}>
                         {HOURS.map((h) => (
-                            <div key={h} style={{
-                                height: HOUR_HEIGHT, fontSize: 9, color: "#9ca3af",
-                                textAlign: "right", paddingRight: 6, paddingTop: 2,
-                                borderBottom: "1px solid #f9fafb",
-                            }}>{h}:00</div>
+                            <div key={h} style={{ height: HOUR_HEIGHT, fontSize: 9, color: "#9ca3af", textAlign: "right", paddingRight: 6, paddingTop: 2, borderBottom: "1px solid #f9fafb" }}>{h}:00</div>
                         ))}
                     </div>
 
                     {weekDays.map((d, dayIdx) => {
-                        const ds = d.toISOString().split("T")[0];
+                        const ds = normalizeRecordDate(d);
                         const isToday = ds === todayStr;
                         const dayTasks = allWeekTasks.filter((t) => t.plannedDate === ds);
-
                         return (
-                            <div key={dayIdx} style={{
-                                flex: 1, position: "relative",
-                                background: isToday ? "rgba(59,130,246,0.04)" : "transparent",
-                                borderLeft: dayIdx === 0 ? "none" : "1px solid #f3f4f6",
-                            }}>
-                                {HOURS.map((h) => (
-                                    <div key={h} style={{ height: HOUR_HEIGHT, borderBottom: "1px solid #f9fafb" }} />
-                                ))}
-
+                            <div key={dayIdx} style={{ flex: 1, position: "relative", background: isToday ? "rgba(59,130,246,0.04)" : "transparent", borderLeft: dayIdx === 0 ? "none" : "1px solid #f3f4f6" }}>
+                                {HOURS.map((h) => <div key={h} style={{ height: HOUR_HEIGHT, borderBottom: "1px solid #f9fafb" }} />)}
                                 {(() => {
-                                    // 按 slot 分组，让同一时段的任务平分槽位高度
                                     const bySlot = {};
                                     dayTasks.forEach((t) => {
                                         const k = t.slot || "morning";
@@ -199,24 +172,28 @@ export default function PlanPage({ monthlyPlan, weeklyPreview, weeklyPlanMeta, t
                                                     key={`${task.id}-${ti}`}
                                                     onClick={() => toggleDone(task.id)}
                                                     style={{
-                                                        position: "absolute", left: 3, right: 3,
+                                                        position: "absolute",
+                                                        left: 3,
+                                                        right: 3,
                                                         top: slotTop + 3 + ti * each,
                                                         height: each - 3,
                                                         background: task.done ? "#f3f4f6" : color.bg,
                                                         borderLeft: `4px solid ${task.done ? "#9ca3af" : color.border}`,
-                                                        borderRadius: 8, padding: "6px 8px",
-                                                        fontSize: 11, lineHeight: 1.35, cursor: "pointer",
-                                                        overflow: "hidden", opacity: task.done ? 0.55 : 1,
+                                                        borderRadius: 8,
+                                                        padding: "6px 8px",
+                                                        fontSize: 11,
+                                                        lineHeight: 1.35,
+                                                        cursor: "pointer",
+                                                        overflow: "hidden",
+                                                        opacity: task.done ? 0.55 : 1,
                                                         boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-                                                        display: "flex", flexDirection: "column", justifyContent: "center",
+                                                        display: "flex",
+                                                        flexDirection: "column",
+                                                        justifyContent: "center",
                                                     }}
                                                     title={task.title}
                                                 >
-                                                    <div style={{
-                                                        fontWeight: 600, color: task.done ? "#6b7280" : "#1f2937",
-                                                        textDecoration: task.done ? "line-through" : "none",
-                                                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                                                    }}>
+                                                    <div style={{ fontWeight: 600, color: task.done ? "#6b7280" : "#1f2937", textDecoration: task.done ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                                         {task.done && "✓ "}{task.title}
                                                     </div>
                                                     {task.subject && (
@@ -236,68 +213,16 @@ export default function PlanPage({ monthlyPlan, weeklyPreview, weeklyPlanMeta, t
                 </div>
             </div>
 
-            {/* 图例 */}
-            <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 10, flexWrap: "wrap" }}>
-                {[
-                    { label: "学习", color: "#3b82f6" },
-                    { label: "复习", color: "#a855f7" },
-                    { label: "考试", color: "#ef4444" },
-                    { label: "休息", color: "#22c55e" },
-                ].map((l) => (
-                    <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#6b7280" }}>
-                        <span style={{ width: 8, height: 8, borderRadius: 2, background: l.color }} />
-                        {l.label}
-                    </div>
-                ))}
-            </div>
-
             {allWeekTasks.length === 0 && (
-                <Card style={{ marginTop: 16, background: "#f3f3f4", textAlign: "center", padding: 20 }}>
+                <Card style={{ marginTop: 6, background: "#f3f3f4", textAlign: "center", padding: 12 }}>
                     <div style={{ fontSize: 24, marginBottom: 6 }}>📅</div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: "#92400e", marginBottom: 4 }}>本周还没有安排</div>
                     <div style={{ fontSize: 11, color: "#a16207", marginBottom: 10 }}>
-                        去「对话」和小言聊聊，或点上方「导入 AI 计划」生成任务
+                        去「计划」和 AI 聊聊，或点上方「导入 AI 计划」生成任务
                     </div>
-                    <Button onClick={() => setTab("home")} style={{ fontSize: 11, padding: "6px 14px" }}>去对话 →</Button>
+                    <Button onClick={() => setTab("intake")} style={{ fontSize: 11, padding: "6px 14px" }}>去计划 →</Button>
                 </Card>
             )}
-
-            {/* 月度粗规划（移到下方） */}
-            <h2 style={{ ...H2, marginTop: 22 }}>🧱 月度粗规划</h2>
-            {monthlyPlan.length === 0 ? (
-                <Card><div style={emptyText}>先在摸底或对话里添加课程后，这里才会生成月度方向。</div></Card>
-            ) : (
-                monthlyPlan.map((item) => (
-                    <Card key={item.id}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-                            <div>
-                                <div style={{ fontSize: 14, fontWeight: 700 }}>{item.subject}</div>
-                                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                                    基础：{item.level} · 目标：{item.targetScore} · 考试：{item.examDate ? fmt(item.examDate) : "未设置"}
-                                </div>
-                            </div>
-                            <Tag>{item.focus}</Tag>
-                        </div>
-                        <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
-                            {item.stages.map((stage) => (
-                                <div key={stage.name} style={{
-                                    padding: "8px 10px", borderRadius: 10,
-                                    background: "#ffffff", border: "1px solid #edf2e8",
-                                }}>
-                                    <div style={{ fontSize: 11, fontWeight: 700, color: "#111111" }}>{stage.name}</div>
-                                    <div style={{ fontSize: 11, color: "#6b6d6d", marginTop: 2 }}>{stage.content}</div>
-                                </div>
-                            ))}
-                        </div>
-                    </Card>
-                ))
-            )}
-
-            <Card style={{ background: "#f3f3f4", marginTop: 12 }}>
-                <div style={{ fontSize: 11, color: "#92400e", lineHeight: 1.6 }}>
-                    当前精力 <b>{getEnergyInfo(currentEnergy).label}</b>。状态不好时点顶部「重排」按钮，系统会把高难度内容顺延到更合适的时段。
-                </div>
-            </Card>
         </div>
     );
 }

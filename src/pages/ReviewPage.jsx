@@ -15,7 +15,7 @@ export default function ReviewPage({ reviews, setReviews, issues, setIssues }) {
             return {
                 ...review,
                 count: nextCount,
-                nextDate: addDays(SR_INTERVALS[nextCount]).toISOString().split("T")[0],
+                nextDate: toLocalDateKey(addDays(SR_INTERVALS[nextCount])),
             };
         }));
     };

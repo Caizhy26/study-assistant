@@ -59,10 +59,9 @@ export const BASE_LEVELS = {
 export const SR_INTERVALS = [1, 3, 7, 14, 30];
 
 export const TABS = [
-    { key: "home", label: "对话", icon: "💬" },
-    { key: "dashboard", label: "总览", icon: "🏠" },
+    { key: "now", label: "现在", icon: "🎯" },
+    { key: "intake", label: "计划", icon: "📝" },
     { key: "study", label: "日程", icon: "📚" },
-    { key: "state", label: "学习", icon: "🔋" },
     { key: "report", label: "报告", icon: "📊" },
 ];
 
@@ -80,5 +79,5 @@ export const STATE_SUBTABS = [
 ];
 
 export const STUDY_ROUTE_KEYS = new Set(["study", "plan", "tasks", "review"]);
-export const STATE_ROUTE_KEYS = new Set(["state", "timer", "energy", "now"]);
+export const STATE_ROUTE_KEYS = new Set(["state", "timer", "energy"]);
 export const VALID_TAB_KEYS = new Set(["home", "dashboard", "study", "state", "report", "intake", "plan", "tasks", "review", "timer", "energy", "now"]);
