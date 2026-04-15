@@ -9,13 +9,11 @@ export default function StudyHub({ initialSubTab = "plan", ...props }) {
     const [sub, setSub] = useState(["plan", "tasks", "review"].includes(initialSubTab) ? initialSubTab : "plan");
 
     return (
-        <div style={{ height: "100%", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <div>
             <SubTabBar tabs={STUDY_SUBTABS} active={sub} onChange={setSub} />
-            <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-                {sub === "plan" && <PlanPage {...props} />}
-                {sub === "tasks" && <div style={{ height: "100%", overflowY: "auto", paddingRight: 2 }}><TasksPage {...props} /></div>}
-                {sub === "review" && <div style={{ height: "100%", overflowY: "auto", paddingRight: 2 }}><ReviewPage {...props} /></div>}
-            </div>
+            {sub === "plan" && <PlanPage {...props} />}
+            {sub === "tasks" && <TasksPage {...props} />}
+            {sub === "review" && <ReviewPage {...props} />}
         </div>
     );
 }

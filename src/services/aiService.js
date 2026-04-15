@@ -251,7 +251,7 @@ export function getOfflineFallbackSlots(count = 4) {
     return Array.from({ length: Math.max(1, count) }, (_, index) => {
         const date = addDays(index + 1);
         return {
-            date: toLocalDateKey(date),
+            date: date.toISOString().split("T")[0],
             slot: slots[index % slots.length],
         };
     });
